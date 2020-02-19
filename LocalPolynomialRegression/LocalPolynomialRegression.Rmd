@@ -1,0 +1,384 @@
+---
+title: "Local Polynomial Regression"
+output: html_document
+---
+\newcommand{\vect}[1]{\boldsymbol{\mathbf{#1}}}
+\newcommand{\vy}{\vect{y}}
+\newcommand{\vx}{\vect{x}}
+\newcommand{\vPsi}{\vect{\Psi}}
+\newcommand{\Psiinv}{\vect{\Psi}^{-1}}
+\newcommand{\vLambda}{\vect{\Lambda}}
+\newcommand{\vary}{\vect{I}_k + \vLambda^\top \Psiinv \vLambda}
+\newcommand{\E}{\vary}
+\newcommand{\Ip}{\vect{I}_p}
+\newcommand{\Ik}{\vect{I}_k}
+\newcommand{\vu}{\vect{u}}
+\newcommand{\vf}{\vect{f}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\vzero}{\vect{0}}
+\newcommand{\vmu}{\vect{\mu}}
+\newcommand{\A}{\Ip}
+\newcommand{\B}{\vLambda}
+\newcommand{\C}{\vLambda^\top\Psiinv}
+\newcommand{\D}{\Ik}
+\newcommand{\Ebb}{\mathbb{E}}
+\newcommand{\mat}[1]{\begin{pmatrix}#1\end{pmatrix}}
+\newcommand{\Exp}[1]{\Ebb\left[#1\right]}
+\newcommand{\Var}[1]{\text{Var}\left[#1\right]}
+\newcommand{\vJ}{\vect{J}}
+\newcommand{\vJinv}{\vJ^{-1}}
+\newcommand{\varx}{\vLambda\vLambda^\top + \vPsi}
+\newcommand{\vSigma}{\vect{\Sigma}}
+\newcommand{\vSigmay}{\vSigma_{\vy}}
+\newcommand{\vSigmayinv}{\vSigmay^{-1}}
+\newcommand{\vCn}{\vect{C}_n}
+\newcommand{\vG}{\vect{G}}
+\newcommand{\vone}{\vect{1}}
+\newcommand{\vI}{\vect{I}}
+\newcommand{\vX}{\vect{X}}
+\newcommand{\vR}{\vect{R}}
+\newcommand{\vQ}{\vect{Q}}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Importing Libraries, echo=FALSE, message=FALSE, warning=FALSE}
+library(readr)
+library(ggplot2)
+library(viridis)
+library(Rcpp)
+library(gridExtra)
+library(microbenchmark)
+```
+
+## Loading the Data
+```{r, Loading the Dataset}
+# Read in the data
+solarAU <- read_csv(
+  file="solarAU.csv", 
+  col_types = cols(
+    X1=col_integer(),
+    prod=col_double(),
+    toy=col_double(),
+    tod=col_double()
+  ))
+# Work with log production, since it's less skewed
+solarAU$logprod <- log(solarAU$prod+0.01)  # +0.01 to avoid -Inf when production is 0
+```
+
+## Plotting the Data
+We can plot the log production as a function of the time of the year and the time of the day.
+```{r Plotting Log-Production Data, echo=FALSE}
+ggplot(solarAU,
+       aes(x = toy, y = tod, z = logprod)) +
+       stat_summary_hex() +
+       scale_fill_gradientn(colours = viridis(50))
+```
+
+## Question 1 - Linear Regression Model
+We want to model $\mathbb{E}[y \mid \boldsymbol{x}]$ as a polynomial regression model. We basically want to solve the following minimization problem
+$$
+\widehat{\beta} = \arg\min_{\beta}\parallel \boldsymbol{y} - \boldsymbol{X}\beta\parallel^2
+$$
+where the model matrix is given by
+```{r Constructing the Model Matrix}
+X <- with(solarAU, cbind(1, tod, tod^2, toy, toy^2))
+y <- solarAU$logprod
+colnames(X) <- c("intercept", "tod", "todsq", "toy", "toysq")
+```
+Cholesky decomposition of a matrix $\Sigma$ can be thought of as the "matrix square root" $R$ so that $R\top R = \Sigma$. In `R` this can be found using the `chol()` function, which returns the **upper triangular** square root matrix of any positive definite matrix, this is called **Cholesky factor**. Cholesky decomposition requires $\frac{n^3}{3}$ FLOPS and $n$ square roots.
+
+The QR decomposition decomposes a $r\times c$ rectangular matrix $\boldsymbol{X}$ (with $r \geq c$) as the product of an upper triangular matrix $R$ and of an orthogonal matrix $Q$ (i.e. with $Q^\top Q = I$), so that $X = QR$. The computational cost of the QR decomposition is $\mathcal{O}(rc^2)$. Notice that the minimization problem above is solved by
+$$
+\widehat{\beta} = (\boldsymbol{X}^\top \boldsymbol{X})\boldsymbol{X}\boldsymbol{y}
+$$
+Using the QR decomposition we can rewrite this expression for $\widehat{\beta}$ as follows
+
+\begin{align}
+  (\vX^\top \vX)\vX^\top \vy &= (\vR^\top \vQ^\top \vQ \vR)^{-1} \vR^\top \vQ^\top \vy \\
+  &= (\vR^\top \vR)^{-1} \vR^\top \vQ^\top \vy \\
+  &= \vR^{-1}\vR^{-\top}\vR^\top \vQ^\top \vy \\
+  &= \vR^{-1}\vQ^\top \vy
+\end{align}
+
+The connection between the QR decomposition and the Cholesky decomposition is that if $\vX = \vR\vQ$ then $\vX^\top \vX = \vR^\top \vR$ so that the QR decomposition of $\vX$ gives the cholesky factorization of $\vX^\top\vX$ for free.
+
+### <font color="orange">Q`R` Solutions</font>
+First, we solve the system using the `lm` routine from `R`. 
+```{r Using `lm()` in R}
+# Fit the model to log production
+lm_fit <- function(data){
+  return(lm(logprod ~ tod + I(tod^2) + toy + I(toy^2), data=data))
+}
+fit <- lm_fit(solarAU)
+```
+We can also solve the system using the `QR` decomposition using the formula derived above. Notice that there's multiple ways of doing this:
+
+- `qr.solve(A, b)` solves a system of equations $Ax = b$ via the QR decomposition. If `A` is a rectangular matrix, `qr.solve` will find its `QR` decomposition and then solve the system of equations. If, instead, `A` is a QR decomposition object this just uses it to solve the system.
+- `solve.qr(A, b)` Basically solve a system using fields and methods of the `QR` object.
+- `qr` to find the `qr` decomposition and then solving it using `solve.qr()`. Notice that this is equivalent to `qr.solve()`.
+
+```{r Microbenchmarking QR Solvers in R}
+# QR + solve.qr = qr.solve
+qr_solve <- function(){
+  return(qr.solve(X, solarAU$logprod))
+}
+# Manual QR + solve
+qr_solve_manual <- function(){
+  # find qr decomposition
+  qr_obj <- qr(X)
+  # Use it with solve
+  return(backsolve(qr.R(qr_obj), t(qr.Q(qr_obj)) %*% solarAU$logprod))
+}
+# Using solve.qr with a qr decomposition
+solve_qr <- function(){
+  # find qr object
+  qr_obj <- qr(X)
+  # solve it with solve.qr()
+  return(solve.qr(qr_obj, solarAU$logprod))
+}
+# Microbenchmark them
+microbenchmark(qr_solve=qr_solve(),
+               manual=qr_solve_manual(),
+               solve_qr=solve_qr(),
+               unit="relative")
+```
+Therefore the fastest way is given by `qr_solve`, among all `qr` solvers. Let's check that they all give the same results.
+```{r Comparing outputs from QR solvers in R}
+qr_solve_result <- qr_solve()
+qr_solve_manual_result <- qr_solve_manual()
+solve_qr_result <- solve_qr()
+one_and_two <- max(abs(qr_solve_result - qr_solve_manual_result))
+one_and_three <- max(abs(qr_solve_result - solve_qr_result))
+two_and_three <- max(abs(qr_solve_manual_result - solve_qr_result))
+lm_and_one <- max(abs(fit$coefficients - qr_solve_result))
+cat("Maximum difference between qr.solve() and manual QR solve: ", one_and_two, "\n",
+    "Maximum difference between qr.solve() and solve.qr(): ", one_and_three, "\n",
+    "Maximum difference between manual QR solve and solve.qr(): ", two_and_three, "\n",
+    "Maximum difference between lm() and qr.solve(): ", lm_and_one)
+```
+
+
+```{r Plotting lm fit in R, eval=FALSE}
+# Add a column to solarAU containing the fitted values
+solarAU$fitPoly <- fit$fitted.values
+# Plot the fitted values
+pl1 <- ggplot(solarAU,
+              aes(x = toy, y = tod, z = fitPoly)) +
+       stat_summary_hex() +
+       scale_fill_gradientn(colours = viridis(50))
+# Plot the difference between fitted values and log production
+pl2 <- ggplot(solarAU,
+              aes(x = toy, y = tod, z = logprod - fitPoly)) +
+       stat_summary_hex() +
+       scale_fill_gradientn(colours = viridis(50))
+grid.arrange(pl1, pl2, ncol = 2)
+```
+
+The residuals are clearly non-linear.
+
+### <font color="orange">Cholesky Solutions in R</font>
+We can also use Cholesky decomposition to solve the same system of equations.
+```{r}
+cholesky_solver <- function(){
+  L <- chol(crossprod(X))
+  return(backsolve(L, forwardsolve(t(L), t(X) %*% solarAU$logprod)))
+}
+chol_result <- cholesky_solver()
+```
+We can check that we do get the same result as the QR decomposition
+```{r}
+max(abs(chol_result - qr_solve_result))
+```
+Finally, we can benchmark the Cholesky solver against the QR solver
+```{r}
+microbenchmark(
+  chol=cholesky_solver(),
+  qr=qr_solve(),
+  unit="relative",
+  times=500
+)
+```
+We can see that the Cholesky decomposition is indeed faster.
+
+## Comparing QR and Cholesky between R and Rcpp
+
+```{r}
+sourceCpp("cppattempt.cpp")
+```
+
+```{r}
+
+```
+
+
+```{r}
+sourceCpp("cppattempt.cpp")
+microbenchmark(
+  RChol=cholesky_solver(),
+  RcppChol=choleskySolverArmadillo(X, y),
+  R_QR=qr_solve(),
+  RcppQR=qrSolverArmadillo(X, y),
+  unit="relative"
+)
+```
+
+## Question 2 - R
+```{r}
+library(mvtnorm)
+lmLocal <- function(y, x0, X0, x, X, H){
+  w <- dmvnorm(x, x0, H)
+  fit <- lm(y ~ -1 + X, weights = w)
+  return( t(X0) %*% coef(fit) )
+}
+```
+
+This has to be done for all rows of $X$. Instead we only do it on a subset of $2000$ rows.
+```{r}
+n <- nrow(X)
+nsub <- 2e3
+sub <- sample(1:n, nsub, replace = FALSE)
+
+y <- solarAU$logprod
+solarAU_sub <- solarAU[sub, ]
+x <- as.matrix(solarAU[c("tod", "toy")])
+x0 <- x[sub, ]
+X0 <- X[sub, ]
+```
+
+Now we compute estimates at each subsampled location
+```{r}
+predLocal <- sapply(1:nsub, function(ii){
+  lmLocal(y = y, x0 = x0[ii, ], X0 = X0[ii, ], x = x, X = X, H = diag(c(1, 0.1)^2))
+})
+```
+
+
+Look at the fit
+```{r}
+solarAU_sub$fitLocal <- predLocal
+```
+
+```{r}
+pl1 <- ggplot(solarAU_sub,
+       aes(x = toy, y = tod, z = fitLocal)) +
+       stat_summary_hex() +
+       scale_fill_gradientn(colours = viridis(50))
+
+pl2 <- ggplot(solarAU_sub,
+       aes(x = toy, y = tod, z = logprod - fitLocal)) +
+       stat_summary_hex() +
+       scale_fill_gradientn(colours = viridis(50))
+
+grid.arrange(pl1, pl2, ncol = 2)
+```
+
+
+## Question 2 in Rcpp
+
+```{r}
+library(Rcpp)
+library(RcppArmadillo)
+```
+
+
+```{r}
+sourceCpp("cppattempt.cpp")
+```
+
+```{r}
+H <- diag(c(1, 0.1)^2)
+```
+
+
+```{r}
+b <- noloop2(y, xo)
+```
+
+
+```{r}
+a <- noloop(y, x0, X0, x, X, H)
+a
+```
+
+
+```{r}
+g <- t(a) %*% a
+g
+```
+
+```{r}
+eigen(g)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+LocalLSFit(y, x0, X0, x, X, diag(c(1, 0.1)^2))
+```
+
+```{r}
+aaa <- rcppgaussian(x, 
+        x0[1, ], 
+        t(chol(diag(c(1, 0.1)^2)))
+)
+```
+
+
+
+```{r}
+dim(aaa)
+```
+
+
+```{r}
+length(dmvnorm(x, x0[1, ],  diag(c(1, 0.1)^2)))
+```
+
+
+
+
+
+
+

@@ -1,0 +1,3 @@
+"0","X <- with(solarAU, cbind(1, tod, tod^2, toy, toy^2))"
+"0","y <- solarAU$logprod"
+"0","colnames(X) <- c(""intercept"", ""tod"", ""todsq"", ""toy"", ""toysq"")"

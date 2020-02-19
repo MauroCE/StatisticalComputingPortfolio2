@@ -1,0 +1,3 @@
+"0","predLocal <- sapply(1:nsub, function(ii){"
+"0","  lmLocal(y = y, x0 = x0[ii, ], X0 = X0[ii, ], x = x, X = X, H = diag(c(1, 0.1)^2))"
+"0","})"

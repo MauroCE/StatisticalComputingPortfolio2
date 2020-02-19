@@ -1,0 +1,339 @@
+---
+title: "Kernel Regression Smoothing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(microbenchmark)
+library(Rcpp)
+library(ggplot2)
+library(tidyr)
+```
+
+## Question 1 - Mean KRS
+
+### <font color="orange">Data Simulation</font>
+Similarly as we've seen in the lecture notes, we simulate some data and plot it.
+$$
+y_i = \sin(4\pi x^3) + z_i \qquad \text{where } z_i \sim N(0, 0.04)
+$$
+
+```{r, message=FALSE, echo=FALSE}
+set.seed(998)
+nobs <- 200 
+x <- runif(nobs)
+y <- sin(4*pi*x^3) + rnorm(nobs, 0, 0.2)
+scatter_data <- data.frame(x=x, y=y)
+ggplot(data=scatter_data) + 
+  geom_point(aes(x=x, y=y), alpha=0.5) +
+  ggtitle("Scatter Plot of Original Data") + 
+  theme(plot.title = element_text(family="serif", size=18, hjust=0.5),
+        axis.title = element_text(family="serif", size=13))
+```
+
+### <font color="orange">Kernel Regression Smoother using R</font>
+Here's the Kernel Regression smoother version using R that was proposed in the lecture notes. There's a minor modification to make it more efficient whereby we calculate `dnorm()` once in each loop iteration rather than twice.
+```{r}
+meanKRS <- function(y, x, x0, lam){
+
+ n <- length(x)
+ n0 <- length(x0)
+ 
+ out <- numeric(n0)
+ for(ii in 1:n0){
+   k = dnorm(x, x0[ii], lam) 
+  out[ii] <- sum( k * y ) / sum( k )   
+ }
+ 
+ return( out )
+}
+```
+
+We can fit this KRS to our dataset and see the result for different values of $\lambda$. 
+```{r, echo=FALSE}
+xseq <- seq(0, 1, length.out = 1000)
+muSmoothLarge <- meanKRS(y = y, x = x, x0 = xseq, lam = 0.06)
+muSmoothSmall <- meanKRS(y = y, x = x, x0 = xseq, lam = 0.02)
+krs_data <- data.frame(muSmoothSmall=muSmoothSmall, muSmoothLarge=muSmoothLarge, x=xseq)
+krs_data <- gather(krs_data, "Lambda", "value", -x)
+krs_scatter <- data.frame(x=x, y=y)
+ggplot(data=krs_scatter) + 
+  geom_point(aes(x=x, y=y), alpha=0.5) + 
+  geom_line(data=krs_data, aes(x=x, y=value, color=Lambda), size=0.75) + 
+  labs(title="Kernel Smoother in R as Lambda changes") + 
+  theme(plot.title=element_text(family="serif", size=18, hjust=0.5),
+        axis.title=element_text(family="serif", size=13),
+        legend.text=element_text(family="serif", size=12),
+        legend.title = element_text(family="serif", size=15)) + 
+  scale_color_manual(labels=c(0.06, 0.02), values=c("#F8766D", "#00BFC4"))
+```
+
+### <font color="orange">Kernel Regression Smoother in Rcpp</font>
+To import the `Rcpp` version of KRS we source the `Rcpp` file and run it.
+```{r}
+sourceCpp("meanKRS_Rcpp.cpp")
+muSmoothLarge_Rcpp <- meanKRS_Rcpp(y = y, x = x, x0 = xseq, lam = 0.06)
+```
+
+We can see that the difference between the `R` version and the `Rcpp` version is very close to `machine precision`.
+
+```{r}
+max(abs(muSmoothLarge - muSmoothLarge_Rcpp))
+```
+
+Indeed, plotting the result from the `Rcpp` version gives the same plot as the `R` version.
+```{r, echo=FALSE}
+xseq <- seq(0, 1, length.out = 1000)
+muSmoothLarge_Rcpp <- meanKRS_Rcpp(y = y, x = x, x0 = xseq, lam = 0.06)
+muSmoothSmall_Rcpp <- meanKRS_Rcpp(y = y, x = x, x0 = xseq, lam = 0.02)
+krs_data_cpp <- data.frame(muSmoothSmallRcpp=muSmoothSmall_Rcpp, 
+                           muSmoothLargeRcpp=muSmoothLarge_Rcpp, x=xseq)
+krs_data_cpp <- gather(krs_data_cpp, "Lambda", "value", -x)
+krs_scatter_cpp <- data.frame(x=x, y=y)
+ggplot(data=krs_scatter_cpp) + 
+  geom_point(aes(x=x, y=y), alpha=0.5) + 
+  geom_line(data=krs_data_cpp, aes(x=x, y=value, color=Lambda), size=0.75) + 
+  labs(title="Kernel Smoother in Rcpp as Lambda changes") + 
+  theme(plot.title=element_text(family="serif", size=18, hjust=0.5),
+        axis.title=element_text(family="serif", size=13),
+        legend.text=element_text(family="serif", size=12),
+        legend.title = element_text(family="serif", size=15)) + 
+  scale_color_manual(labels=c(0.06, 0.02), values=c("#F8766D", "#00BFC4"))
+```
+
+### <font color="orange"> Benchmarking</font>
+
+Now compare the `Rcpp` version with the `R` version on a relative scale. We can see that the `Rcpp` version is about $50\%$ faster on average.
+
+```{r}
+library(microbenchmark)
+mean_Rcpp <- function() meanKRS_Rcpp(y, x, xseq, 0.06)
+mean_R    <- function() meanKRS(y, x, xseq, 0.06)
+microbenchmark(R=mean_R(), Rcpp=mean_Rcpp(), unit="relative")
+```
+
+## Question 2 - Adaptive Kernel Regression Smoothing
+### <font color="purple">Adaptive KRS in R</font>
+The following is a modified version of the `mean_var_KRS()` function seen in class, where `dnorm()` is called once inside each loop, rather than twice, as we've seen before.
+
+```{r}
+mean_var_KRS <- function(y, x, x0, lam){
+
+ n <- length(x)
+ n0 <- length(x0)
+ mu <- res <- numeric(n) 
+   
+ out <- madHat <- numeric(n0)
+ 
+ for(ii in 1:n){
+   k = dnorm(x, x[ii], lam)
+   mu[ii] <- sum( k * y ) / sum( k )   
+ }
+ 
+ resAbs <- abs(y - mu)
+ for(ii in 1:n0){
+   k = dnorm(x, x0[ii], lam)
+  madHat[ii] <- sum( k * resAbs ) / sum( k )   
+ }
+ 
+ w <- 1 / madHat
+ w <- w / mean(w)
+ 
+ for(ii in 1:n0){
+   k = dnorm(x, x0[ii], lam * w[ii])
+  out[ii] <- sum( k * y ) / 
+             sum( k )   
+ }
+ 
+ return( out )
+}
+```
+
+We can look at the results of this function below
+```{r, echo=FALSE}
+r_result = mean_var_KRS(y, x, xseq, 0.06)
+krs_data <- data.frame(muSmoothSmall=muSmoothSmall, muSmoothLarge=muSmoothLarge, 
+                       adaptive=r_result, x=xseq)
+krs_data <- gather(krs_data, "Lambda", "value", -x)
+krs_scatter <- data.frame(x=x, y=y)
+ggplot(data=krs_scatter) + 
+  geom_point(aes(x=x, y=y), alpha=0.5) + 
+  geom_line(data=krs_data, aes(x=x, y=value, color=Lambda), size=0.75) + 
+  labs(title="Adaptive KRS in R") + 
+  theme(plot.title=element_text(family="serif", size=18, hjust=0.5),
+        axis.title=element_text(family="serif", size=13),
+        legend.text=element_text(family="serif", size=12),
+        legend.title = element_text(family="serif", size=15)) + 
+  scale_color_manual(labels=c(0.06, 0.02, "Adaptive"), values=c("#F8766D", "#00BA38", "#619CFF"))
+```
+
+### <font color="purple">Adaptive KRS in Rcpp</font>
+Similary, we can write an adaptive KRS function in `Rcpp`, source it and compare the result with the `R` version. Again, we see the difference is very close to machine precision.
+
+```{r}
+sourceCpp("mean_var_KRS_Rcpp.cpp")
+cpp_result = mean_var_KRS_Rcpp(y, x, xseq, 0.06)
+max(abs(cpp_result - r_result))
+```
+
+In addition, the plot of the results from the Rcpp version is very similar to that of the R version.
+
+```{r, echo=FALSE}
+
+krs_data_cpp <- data.frame(muSmoothSmallRcpp=muSmoothSmall_Rcpp, 
+                           muSmoothLargeRcpp=muSmoothLarge_Rcpp, 
+                           adaptive=cpp_result, x=xseq)
+krs_data_cpp <- gather(krs_data_cpp, "Lambda", "value", -x)
+krs_scatter_cpp <- data.frame(x=x, y=y)
+ggplot(data=krs_scatter_cpp) + 
+  geom_point(aes(x=x, y=y), alpha=0.5) + 
+  geom_line(data=krs_data_cpp, aes(x=x, y=value, color=Lambda), size=0.75) + 
+  labs(title="Adaptive KRS in Rcpp") + 
+  theme(plot.title=element_text(family="serif", size=18, hjust=0.5),
+        axis.title=element_text(family="serif", size=13),
+        legend.text=element_text(family="serif", size=12),
+        legend.title = element_text(family="serif", size=15)) +
+  scale_color_manual(labels=c(0.06, 0.02, "Adaptive"), values=c("#F8766D", "#00BA38", "#619CFF"))
+```
+
+### <font color="purple">Benchmarking</font>
+We can also microbenchmark them and notice how once again the `Rcpp` function is faster than the `R` counterpart, and it has a similar speed improvement as in the previous question.
+```{r}
+microbenchmark(R=mean_var_KRS(y, x, xseq, 0.06), Rcpp=mean_var_KRS_Rcpp(y, x, xseq, 0.06), unit="relative")
+```
+
+## Question 1b - Cross Validation
+### <font color="green">Cross Validation in R</font>
+Below is an `R` implementation of cross-validation.
+
+```{r}
+cvR <- function(x, y, k, lambdas, fun){
+  # CREATE FOLD INDECES
+  n = length(x)
+  fold_indeces_ordered = rep_len(seq(1, k), n)
+  fold_indeces = sample(fold_indeces_ordered, n)
+  
+  # STORE MEAN MSEs FROM EACH LAMBDA
+  all_mean_mses = rep(0, length(lambdas))
+  
+  # LOOP THROUGH LAMBDAS
+  for (lam_index in 1:length(lambdas)){
+    lam = lambdas[lam_index]
+    mean_mse = 0.0
+    
+    # LOOP THROUGH FOLDS
+    for (fold in 1:k){
+      is_in_fold = fold_indeces == fold
+      # Holdout data
+      x_holdout = x[is_in_fold]
+      y_holdout = y[is_in_fold]
+      # Training data
+      x_kept = x[!is_in_fold]
+      y_kept = y[!is_in_fold]
+      # KRS using holdout as testing set
+      krs_value = fun(y_kept, x_kept, x_holdout, lam)
+      fold_mse = mean((krs_value - y_holdout)**2)
+      # Iteratively compute the mean
+      mean_mse = mean_mse + (fold_mse / k)
+    }
+    all_mean_mses[lam_index] = mean_mse
+  }
+  return(all_mean_mses)
+}
+```
+
+We can set some new parameters and data for this specific task.
+```{r, echo=FALSE}
+new <- 500
+xnew <- seq(0.0, 1.0, length.out=new)
+ynew <- sin(4*pi*xnew^3) + rnorm(new, 0, 0.2)
+lambdas <- seq(0.001, 0.02, length.out=100)
+k <- 10
+```
+
+Then, we can run the `R` version and plot its results.
+```{r, echo=FALSE}
+R_cv_result <- cvR(xnew, ynew, k, lambdas, meanKRS)
+min_val_R_mean <- which.min(R_cv_result)
+min_df_R_mean <- data.frame(x=lambdas[min_val_R_mean], y=R_cv_result[min_val_R_mean])
+cv_r_data <- data.frame(x=lambdas, y=R_cv_result)
+ggplot(data=cv_r_data) + 
+  geom_point(aes(x=x, y=y), color="#5333ed") + 
+  geom_point(data=min_df_R_mean, aes(x=x, y=y), color="red", size=1.5) +
+  ggtitle("Mean KRS Cross Validation in R") + 
+  theme(plot.title=element_text(hjust=0.5, size=18, family="serif"),
+        axis.title=element_text(family="serif", size=13))
+```
+
+Similarly, we can do the same with Adaptive KRS
+```{r, echo=FALSE, warning=FALSE}
+R_cv_result_var <- cvR(xnew, ynew, k, lambdas, mean_var_KRS)
+cv_r_data_var <- data.frame(x=lambdas, y=R_cv_result_var)
+min_val_R_var <- which.min(R_cv_result_var)
+min_df_R_var <- data.frame(x=lambdas[min_val_R_var], y=R_cv_result_var[min_val_R_var])
+ggplot(data=cv_r_data_var) + 
+  geom_point(aes(x=x, y=y), color="#5333ed") + 
+  geom_point(data=min_df_R_var, aes(x=x, y=y), color="red", size=1.5) +
+  ggtitle("Adaptive KRS Cross Validation in R") + 
+  theme(plot.title=element_text(hjust=0.5, size=18, family="serif"),
+        axis.title=element_text(family="serif", size=13))
+```
+
+
+### <font color="green">Cross Validation in Rcpp </font>
+Let's use Cross Validation for the non-adaptive case.
+```{r}
+sourceCpp("rcpp_functions.cpp")
+Rcpp_cv_result_mean <- crossvalidation_Rcpp(xnew, ynew, k, lambdas, "mean")
+```
+We can see the results in the following plot.
+```{r, echo=FALSE}
+cv_rcpp_data <- data.frame(x=lambdas, y=Rcpp_cv_result_mean)
+min_val_Rcpp_mean <- which.min(Rcpp_cv_result_mean)
+min_df_Rcpp_mean <- data.frame(x=lambdas[min_val_Rcpp_mean], y=Rcpp_cv_result_mean[min_val_Rcpp_mean])
+ggplot(data=cv_rcpp_data) + 
+  geom_point(aes(x=x, y=y), color="#5333ed") + 
+  geom_point(data=min_df_Rcpp_mean, aes(x=x, y=y), color="red", size=1.5) + 
+  ggtitle("Mean KRS Cross Validation in Rcpp") + 
+  theme(plot.title=element_text(hjust=0.5, size=18, family="serif"),
+        axis.title=element_text(family="serif", size=13))
+```
+
+And again, we can do the same for the Adaptive KRS version.
+
+```{r, echo=FALSE, warning=FALSE}
+Rcpp_cv_result_var <- crossvalidation_Rcpp(xnew, ynew, k, lambdas, "var")
+min_val_Rcpp_var <- which.min(Rcpp_cv_result_var)
+min_df_Rcpp_var <- data.frame(x=lambdas[min_val_Rcpp_var], y=Rcpp_cv_result_var[min_val_Rcpp_var])
+cv_rcpp_data_var <- data.frame(x=lambdas, y=Rcpp_cv_result_var)
+ggplot(data=cv_rcpp_data_var) + 
+  geom_point(aes(x=x, y=y), color="#5333ed") + 
+  geom_point(data=min_df_Rcpp_var, aes(x=x, y=y), color="red", size=1.5) +
+  ggtitle("Adaptive KRS Cross Validation in Rcpp") + 
+  theme(plot.title=element_text(hjust=0.5, size=18, family="serif"),
+        axis.title=element_text(family="serif", size=13))
+```
+
+### <font color="green">Benchmarking</font>
+We can compare the performance of the full R version with the full Rcpp version.
+
+```{r}
+microbenchmark(
+  R_mean   =cvR(xnew, ynew, k, lambdas, meanKRS), 
+  Rcpp_mean=crossvalidation_Rcpp(xnew, ynew, k, lambdas, "mean"), 
+  unit="relative", times=50)
+```
+
+
+Finally, we compare the performance of CrossValidation on the Adaptive KRS.
+```{r}
+microbenchmark(
+  R_var   =cvR(xnew, ynew, k, lambdas, mean_var_KRS), 
+  Rcpp_var=crossvalidation_Rcpp(xnew, ynew, k, lambdas, "var"), 
+  unit="relative", times=20)
+```
+

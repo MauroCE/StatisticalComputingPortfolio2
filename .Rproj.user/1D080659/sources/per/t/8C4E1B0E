@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1582068485995.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3093765458",
+    "id" : "8C4E1B0E",
+    "lastKnownWriteTime" : 1582117315,
+    "last_content_update" : 1582117315852,
+    "path" : "~/Documents/University/StatisticalComputing2/LocalPolynomialRegression/cppattempt.cpp",
+    "project_path" : "LocalPolynomialRegression/cppattempt.cpp",
+    "properties" : {
+        "cursorPosition" : "148,8",
+        "scrollLine" : "128",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "cpp"
+}

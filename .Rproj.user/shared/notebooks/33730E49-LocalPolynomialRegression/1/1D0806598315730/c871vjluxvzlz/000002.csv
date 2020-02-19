@@ -1,0 +1,6 @@
+"0","library(mvtnorm)"
+"0","lmLocal <- function(y, x0, X0, x, X, H){"
+"0","  w <- dmvnorm(x, x0, H)"
+"0","  fit <- lm(y ~ -1 + X, weights = w)"
+"0","  return( t(X0) %*% coef(fit) )"
+"0","}"

@@ -1,0 +1,2 @@
+"0","H <- diag(c(1, 0.1)^2)"
+"0","LocalLSFit(y, x0, X0, x, X, H)"

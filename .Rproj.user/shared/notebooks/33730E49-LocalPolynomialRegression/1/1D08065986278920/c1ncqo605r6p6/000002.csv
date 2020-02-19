@@ -1,0 +1,5 @@
+"0","# Fit the model to log production"
+"0","lm_fit <- function(data){"
+"0","  return(lm(logprod ~ tod + I(tod^2) + toy + I(toy^2), data=data))"
+"0","}"
+"0","fit <- lm_fit(solarAU)"

@@ -1,0 +1,9 @@
+"0","b <- newnoloop(y, x0, X0, x, X, H)"
+"2","
+error: "
+"2","Mat::init(): requested size is not compatible with row vector layout"
+"2","
+"
+"2","Error in newnoloop(y, x0, X0, x, X, H) : 
+  Mat::init(): requested size is not compatible with row vector layout
+"

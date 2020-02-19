@@ -1,0 +1,5 @@
+"0","cholesky_solver <- function(){"
+"0","  L <- chol(crossprod(X))"
+"0","  return(backsolve(L, forwardsolve(t(L), t(X) %*% solarAU$logprod)))"
+"0","}"
+"0","chol_result <- cholesky_solver()"
