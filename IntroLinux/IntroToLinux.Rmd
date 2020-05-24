@@ -1,0 +1,74 @@
+---
+title: "Intro to Linux"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Downloading the Data Set
+We will work with the classic Iris data set. First we need to download it. We do this with the `wget` command.
+
+```{bash}
+wget -O iris.csv "https://raw.githubusercontent.com/jbrownlee/Datasets/master/iris.csv"
+```
+
+Here the flag `-O` is a shorthand for `--output-document` and it is used to specify the file name onto which the data will be downloaded. We can see that the data has been downloaded by running a simple `ls` command.
+```{bash}
+ls
+```
+
+The content of the of the file can be displayed in several ways. For instance, we can use `head` and specify a number of initial rows to display using the `-n` flag.
+```{bash}
+head -n 5 iris.csv
+```
+
+A better option, is to show a table rather than the raw data. We can do this using the `column` command specifying that this is a comma-separated file with the `-s","` option and by specifying tab formatting `-t`.
+```{bash}
+head -n 5 iris.csv | column -s"," -t 
+```
+
+Finally, we can leverage Python to print an even prettier representation of the data. To do this, we install `csvkit`
+
+```{bash, eval=FALSE, message=FALSE}
+pip3 install csvkit
+```
+
+And then we run the following command.
+```{bash}
+head -n 5 iris.csv | csvlook
+```
+
+One can use the `cut` command to extract different columns. This is done by specifying a comma delimiter `-d ","` and then which column we want to analyze via the `-f` flag. 
+```{bash}
+cat iris.csv | head -n 10 | cut -d ',' -f 1
+```
+```{bash}
+cat iris.csv | head -n 10 | cut -d ',' -f 5
+```
+
+# Exploratory Data Analysis
+Let's learn more about this dataset. First of all, we can find out the number of examples it contains.
+```{bash}
+cat iris.csv | wc -l
+```
+
+Next, we want to see how many different classes of irises are availabe. To do this, we just pipe the command used to extract the label column and feed it into the `uniq` keyword. This keyword also takes the flag `-c` which will specify how many occurrences of each unique label are present.
+```{bash}
+cat iris.csv | cut -d ',' -f 5 | uniq -c
+```
+
+As we've seen in the tutorials, we can use text regular expressions to search through the data. One of the most useful commands here is `grep`. For instance, if we want to find all `versicolor`-labelled data points we run this.
+
+```{bash}
+cat iris.csv | grep -i "versicolor" | head -n 5
+```
+
+Notice that we've used the `-i` flag to not account for differences in lower or upper case.
+
+We can now use a bash script to compute the mean, for each flower type, of `sepal_length`, `sepal_width`, `petal_length` and `petal_width` respectively.
+```{bash}
+bash compute_means.sh
+```
+
