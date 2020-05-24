@@ -64,9 +64,12 @@ hist(result)
 In addition, I have also coded a Bootstrap filter on the classical Example by Gordon (1993). We are using `200` time steps to generate the data and `100` particles.
 
 ```{bash}
-g++ BootstrapFilter.cpp random_number_generation.cpp -o bootstrap |
-./bootstrap 200 100 >| "bootstrap_data.txt"
+g++ BootstrapFilter.cpp random_number_generation.cpp -o bootstrap
 ```
+```{bash}
+./bootstrap 200 1000 >| "bootstrap_data.txt"
+```
+
 
 We can see from the following result that it does indeed approximate the hidden states very well.
 
@@ -74,10 +77,24 @@ We can see from the following result that it does indeed approximate the hidden 
 data = unname(as.matrix(read.table("bootstrap_data.txt")))
 x_data = data[1:201, ]
 y_data = data[202:402, ]
-particles = matrix(data[403:nrow(data), ], nrow=201, ncol=100)
+particles = matrix(data[403:nrow(data), ], nrow=201, ncol=1000)
 x_mean = apply(particles, 1, mean)
 plot(x_data, col="black",type="l")
 lines(x_mean, col="red")
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
