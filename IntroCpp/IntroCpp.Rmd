@@ -1,0 +1,83 @@
+---
+title: "Intro to C++"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Random number generation
+Essential to the work of the statistician and data scientist is the generation of random numbers. To do this, we use the `std` library. There are a few concepts that we need to cover.
+
+- **Random device**: A random device, usually instantiated using `std::random_device device_name;` generates a **true** random number generator. It's output is non-deterministic and can depend on stochastic events happening at the hardware level. The consensus is that the best thing to do is to use this output to seed a pseudo-random number generator like the Mersenne Twister.
+- **Engine**: An pseudo-random number engine generates numbers that are apparently random using clever algorithms. One of the most popular ones is the Mersenne Twister. In the `std` library, this is found by `std::mt19937`. Usually one should seed it using a random device
+  ```{Rcpp, eval=FALSE}
+  // Create a random device 
+  std::random_device my_device;
+  // Use it to seed the Mersenne Twister. We call the Mersenne Twister generator 'my_generator'.
+  std::mt19937 my_generator(my_device());
+  ```
+- **Distribution**: A distribution is exactly what it sounds like. The `std` library provides many of them, among which `std::uniform_int_distribution` generating random integers between two integer values, and `std::uniform_real_distribution` generating random reals between two real values. In order to use them one first instantiate a distribution object with the necessary parameters (for instance the range over which to sample random numbers) and then feeds to this variable the generator, to produce an output.
+  ```{Rcpp, eval=FALSE}
+  // Seed generator with a device
+  std::random_device my_device;
+  std::mt19937 my_generator(my_device());
+  // Instantiate the two distributions
+  std::uniform_int_distribution<int>  my_int_distribution(int_range_from, int_range_to);
+  std::uniform_real_distribution<double> my_real_distribution(real_range_from, real_range_to);
+  // Use the distributions
+  std::cout << my_int_distribution(10, 100) << std:endl;
+  std::cout << my_real_distribution(0, 1) << std::endl;
+  ```
+  
+In the script `random_number_generation.cpp` I define several functions that can be used to generate uniform random numbers between `0` and `1`, uniform random integers between two integers, normally distributed numbers and bernoulli samples. In addition, I create a function generating a normal sample using two uniform samples via the Box-Muller transformation.
+
+## Metropolis-Hastings
+We can use the functions defined above to run a Random-Walk Metropolis-Hastings sampler. To do this, we need to define a header file, where we can keep the functions there for later usage. In order to run it, we need to compile the program using the headers.
+
+```{bash}
+g++ metropolis_hastings.cpp random_number_generation.cpp -o metropolis_hastings
+```
+
+We can check that an executable file has indeed been creaed. It is flagged by `*`.
+
+```{bash}
+ls -F
+```
+
+Next we call the program feeding in some command line arguments. 
+
+```{bash}
+./metropolis_hastings 10000 1.0 5.0 2.0 1.0 >> "mh_results.txt"
+```
+
+In the code-chunk above we have called the metropolis hastings algorithm with `10000` iterations, with starting guess `1.0`. The target distribution is a univariate normal distribution with mean `5.0` and scale `2.0`. Finally, the proposal distribution is a normal distribution centered at the current sample and with scale `1.0`.
+
+We can now read the results and see that it does indeed the job.
+
+```{r}
+result = unname(as.matrix(read.table("mh_results.txt")))
+hist(result)
+```
+
+In addition, I have also coded a Bootstrap filter on the classical Example by Gordon (1993). We are using `200` time steps to generate the data and `100` particles.
+
+```{bash}
+g++ BootstrapFilter.cpp random_number_generation.cpp -o bootstrap |
+./bootstrap 200 100 >| "bootstrap_data.txt"
+```
+
+We can see from the following result that it does indeed approximate the hidden states very well.
+
+```{r}
+data = unname(as.matrix(read.table("bootstrap_data.txt")))
+x_data = data[1:201, ]
+y_data = data[202:402, ]
+particles = matrix(data[403:nrow(data), ], nrow=201, ncol=100)
+x_mean = apply(particles, 1, mean)
+plot(x_data, col="black",type="l")
+lines(x_mean, col="red")
+```
+
+
