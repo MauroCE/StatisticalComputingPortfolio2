@@ -75,7 +75,7 @@ ggplot(data=krs_scatter) +
 ### <font color="orange">Kernel Regression Smoother in Rcpp</font>
 To import the `Rcpp` version of KRS we source the `Rcpp` file and run it.
 ```{r}
-sourceCpp("meanKRS_Rcpp.cpp")
+sourceCpp("rcpp_functions.cpp")
 muSmoothLarge_Rcpp <- meanKRS_Rcpp(y = y, x = x, x0 = xseq, lam = 0.06)
 ```
 
@@ -107,7 +107,7 @@ ggplot(data=krs_scatter_cpp) +
 
 ### <font color="orange"> Benchmarking</font>
 
-Now compare the `Rcpp` version with the `R` version on a relative scale. We can see that the `Rcpp` version is about $50\%$ faster on average.
+Now compare the `Rcpp` version with the `R` version on a relative scale. We can see that the `Rcpp` version is about $30\%$ faster on average.
 
 ```{r}
 library(microbenchmark)
@@ -175,8 +175,8 @@ ggplot(data=krs_scatter) +
 Similary, we can write an adaptive KRS function in `Rcpp`, source it and compare the result with the `R` version. Again, we see the difference is very close to machine precision.
 
 ```{r}
-sourceCpp("mean_var_KRS_Rcpp.cpp")
-cpp_result = mean_var_KRS_Rcpp(y, x, xseq, 0.06)
+sourceCpp("rcpp_functions.cpp")
+cpp_result = mean_var_KRS_Rcpp(y=y, x=x, x0=xseq, 0.06)
 max(abs(cpp_result - r_result))
 ```
 
