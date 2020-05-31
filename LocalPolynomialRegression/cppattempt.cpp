@@ -138,7 +138,7 @@ vec noloop(arma::vec& y,
            arma::mat& H){
   // Number of points we are doing local polynomial regression on
   int nsub = x0.n_rows;
-  // Cholesky decomposition of the matrix L
+  // Cholesky decomposition H
   mat L = chol(H, "lower");
   // Store the final output here
   vec out(2, fill::zeros);  // should be nsub

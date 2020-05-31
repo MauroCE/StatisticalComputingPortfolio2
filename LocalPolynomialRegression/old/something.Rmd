@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # IMPORTS
 
-```{r, message=FALSE, warning=FALSE}
+```{r}
 library(readr)
 library(ggplot2)
 library(viridis)
@@ -77,21 +77,23 @@ matrix(predLocal[1:10])
 
 
 # CPP CODE FOR STUFF
-
-
 ```{r}
-system.time(local_Rcpp(y, x0, X0, x, X, H))
+out <- local3(y, x0, X0, x, X, H)
+out
 ```
 
-
-
 ```{r}
-system.time(sapply(1:nsub, function(ii){
+out <- local4(y, x0, X0, x, X, H)
+```
+
+```{r, eval=FALSE}
+microbenchmark(R=sapply(1:nsub, function(ii){
   lmLocal(y = y, x0 = x0[ii, ], X0 = X0[ii, ], x = x, X = X, H = diag(c(1, 0.1)^2))
-}))
+}), Rcpp=local4(y, x0, X0, x, X, H), unit="relative")
 ```
 
-
-
+```{r}
+system.time(local4(y, x0, X0, x, X, H))
+```
 
 

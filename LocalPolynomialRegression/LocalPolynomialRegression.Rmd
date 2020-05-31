@@ -50,6 +50,7 @@ library(viridis)
 library(Rcpp)
 library(gridExtra)
 library(microbenchmark)
+library(RcppArmadillo)
 ```
 
 ## Loading the Data
@@ -180,7 +181,7 @@ The residuals are clearly non-linear.
 
 ### <font color="orange">Cholesky Solutions in R</font>
 We can also use Cholesky decomposition to solve the same system of equations.
-```{r}
+```{r Choelesky Solver in R}
 cholesky_solver <- function(){
   L <- chol(crossprod(X))
   return(backsolve(L, forwardsolve(t(L), t(X) %*% solarAU$logprod)))
@@ -188,11 +189,11 @@ cholesky_solver <- function(){
 chol_result <- cholesky_solver()
 ```
 We can check that we do get the same result as the QR decomposition
-```{r}
+```{r Compare Results R Cholesky Solver vs R QR solver}
 max(abs(chol_result - qr_solve_result))
 ```
 Finally, we can benchmark the Cholesky solver against the QR solver
-```{r}
+```{r Benchmark R Chol and QR}
 microbenchmark(
   chol=cholesky_solver(),
   qr=qr_solve(),
@@ -204,28 +205,22 @@ We can see that the Cholesky decomposition is indeed faster.
 
 ## Comparing QR and Cholesky between R and Rcpp
 
-```{r}
-sourceCpp("cppattempt.cpp")
+```{r Arma Chol}
+sourceCpp("newcpp.cpp")
+max(abs(choleskySolverArmadillo(X, solarAU$logprod) - cholesky_solver()))
 ```
 
-```{r}
-
-```
-
-
-```{r}
-sourceCpp("cppattempt.cpp")
-microbenchmark(
-  RChol=cholesky_solver(),
-  RcppChol=choleskySolverArmadillo(X, y),
-  R_QR=qr_solve(),
-  RcppQR=qrSolverArmadillo(X, y),
-  unit="relative"
-)
+```{r Microbench Arma Chol and others}
+microbenchmark(RChol=cholesky_solver(),
+               RQR=qr_solve(),
+               ArmaChol=choleskySolverArmadillo(X, y),
+               ArmaQR=qrSolverArmadillo(X, y),
+               unit="relative",
+               times=500)
 ```
 
 ## Question 2 - R
-```{r}
+```{r Q2 lmLocal function}
 library(mvtnorm)
 lmLocal <- function(y, x0, X0, x, X, H){
   w <- dmvnorm(x, x0, H)
@@ -235,7 +230,7 @@ lmLocal <- function(y, x0, X0, x, X, H){
 ```
 
 This has to be done for all rows of $X$. Instead we only do it on a subset of $2000$ rows.
-```{r}
+```{r Q2 subsetting}
 n <- nrow(X)
 nsub <- 2e3
 sub <- sample(1:n, nsub, replace = FALSE)
@@ -248,19 +243,18 @@ X0 <- X[sub, ]
 ```
 
 Now we compute estimates at each subsampled location
-```{r}
+```{r Q2 predLocal calculation}
 predLocal <- sapply(1:nsub, function(ii){
   lmLocal(y = y, x0 = x0[ii, ], X0 = X0[ii, ], x = x, X = X, H = diag(c(1, 0.1)^2))
 })
 ```
 
-
 Look at the fit
-```{r}
+```{r Q2 predictions in df}
 solarAU_sub$fitLocal <- predLocal
 ```
 
-```{r}
+```{r Q2 Plot predictions}
 pl1 <- ggplot(solarAU_sub,
        aes(x = toy, y = tod, z = fitLocal)) +
        stat_summary_hex() +
@@ -277,108 +271,36 @@ grid.arrange(pl1, pl2, ncol = 2)
 
 ## Question 2 in Rcpp
 
-```{r}
-library(Rcpp)
-library(RcppArmadillo)
-```
+Let's fit the Rcpp version
 
-
-```{r}
-sourceCpp("cppattempt.cpp")
-```
-
-```{r}
+```{r Q2 Rcpp predLocalRcpp}
+sourceCpp("newcpp.cpp")
 H <- diag(c(1, 0.1)^2)
+predLocal_Rcpp <- local_Rcpp(y, x0, X0, x, X, H)
 ```
 
+and compare its results with the R version and see that they deliver very similar results.
 
-```{r}
+```{r Compare results}
+max(abs(predLocal - predLocal_Rcpp))
+```
+
+Using microbenchmark would take too long as it would repeat fitting many times (100 by default). Instead, we simply use system.time which, although much less precise, it's quicker.
+
+```{r Time R version}
+system.time(sapply(1:nsub, function(ii){
+  lmLocal(y = y, x0 = x0[ii, ], X0 = X0[ii, ], x = x, X = X, H = diag(c(1, 0.1)^2))
+}))
+```
+
+```{r Time Rcpp Version}
+system.time(local_Rcpp(y, x0, X0, x, X, H))
+```
+
+```{r, echo=FALSE, eval=FALSE}
 b <- noloop2(y, xo)
-```
-
-
-```{r}
 a <- noloop(y, x0, X0, x, X, H)
-a
-```
-
-
-```{r}
-g <- t(a) %*% a
-g
-```
-
-```{r}
-eigen(g)
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
 LocalLSFit(y, x0, X0, x, X, diag(c(1, 0.1)^2))
 ```
-
-```{r}
-aaa <- rcppgaussian(x, 
-        x0[1, ], 
-        t(chol(diag(c(1, 0.1)^2)))
-)
-```
-
-
-
-```{r}
-dim(aaa)
-```
-
-
-```{r}
-length(dmvnorm(x, x0[1, ],  diag(c(1, 0.1)^2)))
-```
-
-
-
-
-
 
 
