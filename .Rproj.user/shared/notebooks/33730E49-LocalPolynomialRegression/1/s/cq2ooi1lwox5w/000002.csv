@@ -4,3 +4,4 @@
 "0","library(Rcpp)"
 "0","library(gridExtra)"
 "0","library(microbenchmark)"
+"0","library(RcppArmadillo)"

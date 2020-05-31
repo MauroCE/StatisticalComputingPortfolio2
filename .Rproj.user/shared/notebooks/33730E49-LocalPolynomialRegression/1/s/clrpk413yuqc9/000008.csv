@@ -1,4 +1,0 @@
-"0","ggplot(solarAU,"
-"0","       aes(x = toy, y = tod, z = logprod)) +"
-"0","       stat_summary_hex() +"
-"0","       scale_fill_gradientn(colours = viridis(50))"
