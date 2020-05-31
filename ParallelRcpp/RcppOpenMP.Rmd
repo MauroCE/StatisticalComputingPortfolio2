@@ -1,0 +1,127 @@
+---
+title: "ParallelRcpp"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# OpenMP and Rcpp
+Suppose that we want to compute the sum of 5 matrices, as seen in lectures. One way to do this in Rcpp would be the following function, which takes references to matrices in R and computes the sum using Armadillo.
+
+```{r}
+library(Rcpp)
+sourceCpp(code='
+// [[Rcpp::depends(RcppArmadillo)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+// [[Rcpp::export(name="matrix_sum")]]
+mat matrix_sum(mat& A, mat& B, mat& C, mat& D, mat& E){
+return A + B + C + D + E;
+}
+')
+```
+
+One could implement this also using a for loop, as suggested in lectures. Notice that we are using `.at` which is faster to access elements.
+
+```{r}
+sourceCpp(code = '
+// [[Rcpp::depends(RcppArmadillo)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+// [[Rcpp::export(name = "matrix_sum_loop")]]
+Rcpp::NumericMatrix tmpFun_i(mat& A, mat& B, mat& C, mat& D, mat& E) {
+  Rcpp::NumericMatrix ZR(A.n_rows, A.n_cols);
+  Mat<double> ZA(ZR.begin(), ZR.nrow(), ZR.ncol(), false);
+  for (int i=0; i < ZA.n_rows; i++){
+    for (int j=0; j < ZA.n_cols; j++){
+      ZA.at(i, j) = A.at(i, j) + B.at(i, j) + C.at(i, j) + D.at(i, j) + E.at(i, j);
+    }
+  }
+  return ZR;
+}')
+```
+
+We can parallelize this using OpenMP. We just add the OpenMP plugin `// [[Rcpp::plugins(openmp)]]` and then write the directive to parallelize the for loop. Notice that we have two for loops, nested. In order to parallelize both we need to specify `collapse(2)`.
+
+```{r}
+sourceCpp(code = '
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::plugins(openmp)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+// [[Rcpp::export(name = "matrix_sum_loop_omp")]]
+Rcpp::NumericMatrix matrix_sum_loop_omp(mat& A, mat& B, mat& C, mat& D, mat& E, int ncores) {
+  Rcpp::NumericMatrix ZR(A.n_rows, A.n_cols);
+  Mat<double> ZA(ZR.begin(), ZR.nrow(), ZR.ncol(), false);
+  
+  #if defined(_OPENMP)
+  #pragma omp parallel for num_threads(ncores) collapse(2)
+  #endif
+  for (int i=0; i < ZA.n_rows; i++){
+    for (int j=0; j < ZA.n_cols; j++){
+      ZA.at(i, j) = A.at(i, j) + B.at(i, j) + C.at(i, j) + D.at(i, j) + E.at(i, j);
+    }
+  }
+  return ZR;
+}')
+```
+
+We can also write the same function but only parallelizing the outer for loop. This makes sense because possibly the overhead of parallelizing so many computations could not be worth the saving in time.
+
+```{r}
+sourceCpp(code = '
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::plugins(openmp)]]
+#include <RcppArmadillo.h>
+using namespace arma;
+
+// [[Rcpp::export(name = "matrix_sum_loop_omp_nocollapse")]]
+Rcpp::NumericMatrix matrix_sum_loop_omp(mat& A, mat& B, mat& C, mat& D, mat& E, int ncores) {
+  Rcpp::NumericMatrix ZR(A.n_rows, A.n_cols);
+  Mat<double> ZA(ZR.begin(), ZR.nrow(), ZR.ncol(), false);
+  
+  #if defined(_OPENMP)
+  #pragma omp parallel for num_threads(ncores)
+  #endif
+  for (int i=0; i < ZA.n_rows; i++){
+    for (int j=0; j < ZA.n_cols; j++){
+      ZA.at(i, j) = A.at(i, j) + B.at(i, j) + C.at(i, j) + D.at(i, j) + E.at(i, j);
+    }
+  }
+  return ZR;
+}')
+```
+
+Finally, we can test our functions and compare them to the standard `R` addition. 
+
+```{r}
+A <- B <- C <- D <- E <- matrix(rnorm(40000), 200, 200)
+```
+
+We can see that in general the loop brings a speed up compared to the standard R version, however it is hard to beat the plain Armadillo implementation.
+
+```{r}
+library(microbenchmark)
+microbenchmark(
+  R=A+B+C+D+E, 
+  Arma=matrix_sum(A, B, C, D, E), 
+  Loop=matrix_sum_loop(A, B, C, D, E), 
+  OMP1=matrix_sum_loop_omp(A, B, C, D, E, 1),
+  OMP1_nc=matrix_sum_loop_omp_nocollapse(A, B, C, D, E, 1),
+  OMP2=matrix_sum_loop_omp(A, B, C, D, E, 2), 
+  OMP2_nc=matrix_sum_loop_omp_nocollapse(A, B, C, D, E, 2),
+  OMP3=matrix_sum_loop_omp(A, B, C, D, E, 3),
+  OMP3_nc=matrix_sum_loop_omp_nocollapse(A, B, C, D, E, 3),
+  OMP4=matrix_sum_loop_omp(A, B, C, D, E, 4),
+  OMP4_nc=matrix_sum_loop_omp_nocollapse(A, B, C, D, E, 4),
+  OMP5=matrix_sum_loop_omp(A, B, C, D, E, 5), 
+  OMP5_nc=matrix_sum_loop_omp_nocollapse(A, B, C, D, E, 5),
+  unit="relative", times=2000)
+```
+
+

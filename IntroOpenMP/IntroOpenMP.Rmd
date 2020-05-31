@@ -1,0 +1,140 @@
+---
+title: "Introduction to OpenMP"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+library(ggplot2)
+```
+
+# Map-Reduce Summation: Estimating Pi
+Suppose we have a unit circle centered at the origin and a square of size $2$ also centered at the origin. Then the ratio of the area of the circle against the square is given by
+$$
+\text{ratio} = \frac{\text{Area Circle}}{\text{Area Square}} = \frac{\pi\cdot 1}{2^2} = \frac{\pi}{4}
+$$
+This means that we can approximate $\pi$ as by generating a uniformly distributed random number between $-1$ and $1$ and then counting whether it falls withing the circle or not. By taking the ratio between $N_{\text{circle}}$ and $N_{\text{square}}$ then we have
+$$
+\pi = 4 \times\frac{\text{Area Circle}}{\text{Area Square}} \approx 4 \times \frac{N_{\text{circle}}}{N_{\text{square}}}
+$$
+To check whether a point $(x, y)$ is in the circle we simply check $x^2 + y^2 \leq 1$. In the file `calculate_pi.cpp` I have written a script that takes as input the total number $N_{\text{square}}$ and returns an estimate of $\pi$. 
+
+```{Rcpp, eval=FALSE}
+int main(int argc, char **argv){
+  // Total number of simulations = n_square
+  int n_square = std::stoi(argv[1]);
+  int n_circle = 0;
+
+  #pragma omp parallel reduction( + : n_circle )
+  {
+    int private_n_circles = 0;
+    
+    #pragma omp for
+    for (int i=0; i<n_square; i++){
+      // Compute x and y coordinates
+      double x_coord = 2*random_uniform01() - 1;
+      double y_coord = 2*random_uniform01() - 1;
+      // Check if it is inside the circle
+      if (x_coord*x_coord + y_coord*y_coord <= 1){
+        private_n_circles += 1;
+      }
+    }
+    
+    #pragma omp critical
+    {
+      n_circle += private_n_circles;
+    }
+  }
+  double pi = 4*(double)n_circle / (double)n_square;
+  std::cout << pi << std::endl;
+}
+```
+
+We can see how we are using the directive `#pragma omp parallel reduction( + : n_circle )` to specify that that block of code will have to be run in parallel. `reduction( + : n_circle)` means that when doing a reduction we sum up all the individual results from the threads and then we reduce them using binary tree reduction. The function `random_uniform01()` is the same used in the `IntroCpp.cpp` portfolio. 
+
+To compile the program we use
+```{bash}
+g++ -fopenmp calculate_pi.cpp random_number_generation.cpp -o calculate_pi
+```
+
+Then we can run it and feed the total number of simulations
+```{bash}
+OMP_NUM_THREADS=50; ./calculate_pi 1000000
+```
+
+
+# Min-Max Reductions
+We can also use `min` and `max` to do reductions and we can write a shorter version of the for loop directive, as shown in this snippet of code, which is part of `min_reduction.cpp`.
+
+```{Rcpp, eval=FALSE}
+// Subtract vectors and then subtract all the elements of this new vector
+#pragma omp parallel reduction(max : min_max)
+{
+  int elementwise_min = 0;
+  
+  #pragma omp for
+  for (int i=0; i < n_integers; i++){
+    elementwise_min = std::min(vector1[i], vector2[i]);  // min
+  }
+  min_max = std::max(min_max, elementwise_min);
+}
+```
+
+Indeed compiling the script
+
+```{bash}
+g++ -fopenmp min_reduction.cpp random_number_generation.cpp  -o min_reduction
+```
+
+and running it we obtain
+
+```{bash}
+./min_reduction -10 10 100000
+```
+
+# User-defined Reductions
+Reductions can also be defined by the user. For instance, suppose that we want to have a reduction that takes the previously reduced value, sums to it the new value and computes the modulo $7$ operation. The function will look something like this:
+
+```{Rcpp, eval=FALSE}
+// Define a function that sums two integers and then computes the modulo 7 of the result
+// This function will be used to perform reduction. The first argument will be the already 
+// reduced value, the second argument will be the new value.
+int modulo7_sum(int already_reduced, int newvalue){
+  return (already_reduced + newvalue) % 7;
+}
+```
+
+To turn this into a reduction, we need to declare it. We do this as follows:
+
+```{Rcpp, eval=FALSE}
+// Declare/Define a new reduction
+#pragma omp declare reduction (modulo7_summation : int : omp_out = modulo7_sum(omp_out, omp_in)) initializer(omp_priv=0)
+```
+
+where essentially `int` indicates the input type, `omp_out` is the output of the binary reduction. In this case the output is given by the output of the `modulo7_sum` reduction of the previously reduced value and the new value. Finally, we can also set an initializer, in this case we set an initial value of `0`.
+
+Then our main loop, found in `custom_reductions.cpp` can look as follow:
+
+```{Rcpp, eval=FALSE}
+int main(int argc, char **argv){
+  int n = std::stoi(argv[1]);
+  int tot = 0;
+  
+  #pragma omp parallel reduction(modulo7_summation: tot)
+  {
+    int one = 0;
+    #pragma omp for
+    for (int i=0; i < n; i++){
+      ++one;
+    }
+    tot = modulo7_sum(tot, one);
+  }
+  std::cout << tot << std::endl;
+}
+```
+
+
+

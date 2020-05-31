@@ -1,0 +1,134 @@
+---
+title: "Sitmo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Drawing an Integer
+Standard R's RNG is not threadsafe. For this reason, we use `sitmo`. Sitmo works well with the `boost` library, as we will see later. For now, let's see how we can do the most basic draw: drawing an integer between `1` and the maximum integer `sitmo::prng::max()`.
+First, we import the library and source the file `drawNInt.cpp`.
+```{r}
+library(Rcpp)
+sourceCpp("drawNInt.cpp")
+```
+
+The key part of the script is that we pass in a seed and we use it to set up the engine. This engine, as we will see, will work well with the boost distributions. For now we can simply feed the seed into the engine by casting it into a `uint32_t`
+
+```{Rcpp, eval=FALSE}
+// Firstly we set up the engine. When this is called, it will generate a random number
+// between 0 and sitmo::prng::max(). We need to feed into the engine a seed, but we need to cast it
+uint32_t casted_seed = static_cast<uint32_t>(seed);
+sitmo::prng engine(casted_seed);
+```
+
+and then we can call the engine to draw a random integer, in a similar way as to the `IntroCpp` portfolio.
+
+```{Rcpp, eval=FALSE}
+for (unsigned int i=0; i < n; i++){
+  draws(i) = engine();
+}
+```
+
+Running the function, we can see that it does indeed the job.
+
+```{r}
+drawNInt(10, 1)
+```
+
+## Bootstrap Filter
+We can do a more advanced example by trying to parallelize a BootstrapFilter. The sequential bootstrap filter is given in `BootstrapFilter.cpp`. This is run on the usual example by Gordon (1993). We can see that it does a good job at inferring the hidden state.
+
+```{r}
+sourceCpp("BootstrapFilter.cpp")
+data = generate_data(t_max = 100, transition_scale = sqrt(10), emission_scale = 1.0, prior_scale = sqrt(10))
+out = particle_filter(t_max=100, n_particles = 200, y=data[, 2], prior_mean = 0.0, 
+                      prior_scale = sqrt(10), transition_scale = sqrt(10), likelihood_scale = 1.0)
+plot(0:100, data[, 1], type='l')
+lines(0:100, apply(out, 1, mean), type='l', col='red')
+```
+
+We can also run the parallel version and see similar results.
+
+```{r}
+sourceCpp("BootstrapFilterParallel.cpp")
+data = generate_data(t_max = 100, transition_scale = sqrt(10), emission_scale = 1.0, prior_scale = sqrt(10))
+out = particle_filter_par(t_max=100, n_particles = 200, y=data[, 2], prior_mean = 0.0, 
+                      prior_scale = sqrt(10), transition_scale = sqrt(10), likelihood_scale = 1.0, ncores=5)
+plot(0:100, data[, 1], type='l')
+lines(0:100, apply(out, 1, mean), type='l', col='red')
+```
+
+Let's compare the two versions. We can see that the parallel version is almost twice as fast as the sequential version!
+
+```{r}
+data = generate_data(t_max = 100, transition_scale = sqrt(10), emission_scale = 1.0, prior_scale = sqrt(10))
+np = 1500 # number of particles
+library(microbenchmark)
+microbenchmark(seq=particle_filter(t_max=100, n_particles = np, y=data[, 2], prior_mean = 0.0, 
+                      prior_scale = sqrt(10), transition_scale = sqrt(10), likelihood_scale = 1.0),
+               par=particle_filter_par(t_max=100, n_particles = np, y=data[, 2], prior_mean = 0.0, 
+                      prior_scale = sqrt(10), transition_scale = sqrt(10), likelihood_scale = 1.0, ncores=4), unit="relative")
+```
+
+Let's dig into the parallel version. First of all, we need to use the correct data structures, and avoid those that are not thread-safe. For this reason, we wrap `particles` with `RcppParallel::Rvector`:
+
+```{Rcpp, eval=FALSE}
+RcppParallel::RMatrix<double> Pparticles(particles);
+```
+
+Next, since we have already defined the output matrix `particles` we can set the RNG scope, this is to avoid a frequent bug in Rcpp.
+
+```{Rcpp, eval=FALSE}
+RNGScope scope;
+```
+
+Now what we want to do is to have different seeds
+
+```{Rcpp, eval=FALSE}
+NumericVector seeds(ncores);
+for (unsigned int ii=0; ii < ncores; ii++){
+  seeds[ii] = random_int(100*ii + 1, 100*ii + 100);
+}
+```
+
+Therefore we sample the seeds uniformly from different intervals, to avoid the possibility in which different threads have the same seed.
+Inside the main for loop (over time) we also grab the corresponding seed from `seeds` using `omp_get_thread_num()` and we use it to seed an engine.
+
+```{Rcpp, eval=FALSE}
+uint32_t coreSeed = static_cast<uint32_t>(seeds[omp_get_thread_num()]);   // grab the corresponding seed and cast it
+sitmo::prng_engine coreEngine = sitmo::prng_engine(coreSeed);    // grab the engine
+```
+
+Then we parallelize all the bits that are parallelizable (except the resampling step) using the following structure:
+
+```{Rcpp, eval=FALSE}
+#pragma omp parallel num_threads(ncores)
+{
+  #pragma omp for schedule(static)
+  for (unsigned int particle_index=0; particle_index < n_particles; particle_index ++){
+    // CODE
+  }
+}
+```
+
+The trickiest bit is when we need to sample from the transition distribution. 
+
+```{Rcpp, eval=FALSE}
+#pragma omp parallel num_threads(ncores)
+{
+  #pragma omp for schedule(static)
+  for (unsigned int particle_index=0; particle_index < n_particles; particle_index ++){
+    // instantiate the distribution
+    boost::random::normal_distribution<float> trans(meanfunc(Pparticles(i-1, particle_index), i), transition_scale);
+    //particles(i, particle_index) = transition(particles(i-1, particle_index), i, transition_scale); //trans(coreEngine);
+    particles(i, particle_index) = trans(coreEngine);
+  }
+}
+```
+
+We can see that we instantiate a `boost` normal distribution and we use `Pparticles` rather than `particles` because it is thread-safe. Then we feed the corresponding engine to the distribution, to sample from the transition.
+
+

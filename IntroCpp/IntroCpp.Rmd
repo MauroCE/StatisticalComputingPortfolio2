@@ -84,9 +84,57 @@ lines(x_mean, col="red")
 ```
 
 
+# Parallelizing with OpenMP
+We can use OpenMP to parallelize some of the for loops. For instance, we can parallelize the generation of noise in the metropolis hastings algorithm. This is done in the script `metropolis_hastings_openmp.cpp`. We can compile it with OpenMP as follows:
+
+```{bash}
+g++ -fopenmp metropolis_hastings_openmp.cpp random_number_generation.cpp -o mhopenmp
+```
+
+Next, we define the number of threds, say $10$, and run the executable
+
+```{bash}
+OMP_NUM_THREADS=10 ; ./mhopenmp 10000 1.0 5.0 2.0 1.0 >> "mh_results_openmp.txt"
+```
+
+reading the results we see indeed similar results.
+```{r}
+result = unname(as.matrix(read.table("mh_results_openmp.txt")))
+hist(result)
+```
+
+We can look at the execution time as well using the `time` command. 
+
+```{bash}
+time ./metropolis_hastings 100000 1.0 5.0 2.0 1.0 >> "mh_results.txt"
+```
+
+We can see that there is a bit of an improvement, possibly due to the improvement in the initialization.
+
+```{bash}
+time ./mhopenmp 100000 1.0 5.0 2.0 1.0 >> "mh_results_openmp.txt"
+```
+
+We can similarly parallelize some parts of the BootstrapFilter, as shown in `BootstrapFilter_openmp.cpp`.
+
+```{bash}
+g++ -fopenmp BootstrapFilter_openmp.cpp random_number_generation.cpp -o bootstrap_openmp
+```
+
+We can time how long it takes.
+
+```{bash}
+time ./bootstrap_openmp 200 1000 >> "bootstrap_data_openmp.txt"
+```
 
 
+and compare it against the normal bootstrap
 
+```{bash}
+time ./bootstrap 200 1000 >> "bootstrap_data.txt"
+```
+
+In this case, it seems that the constant addition of parallel blocks actually slowed down the algorithm. The reason behind this is probably that the overhead in parallelizing is higher than the benefit, as the computational task is not too expensive.
 
 
 
