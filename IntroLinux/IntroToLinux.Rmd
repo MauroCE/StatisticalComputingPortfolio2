@@ -72,3 +72,89 @@ We can now use a bash script to compute the mean, for each flower type, of `sepa
 bash compute_means.sh
 ```
 
+# VimTutor
+### Welcome Page
+To learn vim we will be using VimTutor which comes shipped in the command line. Just type `vimtutor` and you will be prompted with the following screen.
+
+![](images/welcome.png)
+
+### Navigation
+Immadiately we see that we can use the following commands in vim mode to **navigate**
+
+- `j`: down arrow.
+- `k`: top arrow.
+- `h`: left arrow.
+- `l`: right arrow.
+
+### Exiting Vim
+
+ - Press `ESC` to go to Normal mode.
+ - Type the command below and then Enter.
+    - `:q!` to discard changes. (`q` for quit)
+    - `:wq` to *w*rite and *q*uit.
+
+### Editing Text
+
+- **Delete**: Press `x` to delete the character under the cursor. (press `dd` to delete the whole line)
+- **Insert**: Press `i` to go to insert mode. Notice that insertion happens _on the left_ of the cursor. This means that we want to place the cursor _after_ where we want to insert text.
+- **Append**: Press `A` to append text. This literally means that if you place the cursor on a given line of text, pressing A will bring you into insert mode, at the end of the line.
+
+
+### Fancy Deletion Commands
+
+- Deleting a **word**: Place cursor on the first letter of the word you want to delete and press `dw` for delete word.
+- Delete to **end of line**: `d$` to delete everything on the right of the cursor, until the end of the line.
+
+
+### Operators and Motions
+Often we use `operator motion` where, for instance
+
+- `d` is the delete operator
+- `w` (word + trailing space), `e` (word), `0` (start of the line) and `$` (to end of line) are motions.
+
+Pressing motions without operators will move the cursor!
+If we type a number before a motion, it will repeat that motion that number of times, so we can move quicker. 
+
+For instance, to delete `4` words use `d4w`. Placing a number before `dd` will also delete that number of lines.
+
+## Undo Command
+To undo the previous command type `u`. Upper case `U` to undo everything done on a line. `CTRL` and `r` revert the undoing.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
